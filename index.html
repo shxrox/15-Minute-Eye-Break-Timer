@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>15 Minute Eye Break Timer</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Inter font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom style for the timer text to make it stand out */
+        #countdownDisplay {
+            font-size: 10vw;
+            line-height: 1;
+            /* Prevent font-size change from causing layout shift */
+            min-height: 1.2em; 
+        }
+        @media (min-width: 768px) {
+            #countdownDisplay {
+                font-size: 8rem; /* 128px */
+            }
+        }
+        /* Ensure modal is on top */
+        #lookAwayModal {
+            z-index: 100;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white h-full flex items-center justify-center antialiased overflow-hidden">
+
+    <!-- Total Time Display (Top Left) -->
+    <div id="totalTimeDisplay" class="fixed top-4 left-4 bg-gray-800 text-gray-300 px-4 py-2 rounded-lg shadow-lg text-sm md:text-base z-10">
+        Total Time: 00:00:00
+    </div>
+
+    <!-- Main Content -->
+    <div class="text-center p-4">
+        <h1 class="text-3xl md:text-5xl font-bold mb-4">Screen Break Timer</h1>
+        <p class="text-lg md:text-xl text-gray-400 mb-8">Click start to begin your 15-minute work cycles.</p>
+        
+        <!-- Countdown Timer -->
+        <div id="countdownDisplay" class="font-extrabold text-gray-100 mb-10">
+            15:00
+        </div>
+
+        <!-- Start/Stop Button -->
+        <button id="startButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-12 text-2xl rounded-full shadow-lg transition-all duration-300 ease-in-out transform hover:scale-105">
+            Start
+        </button>
+    </div>
+
+    <!-- "Look Away" Modal (Forceful Popup) -->
+    <div id="lookAwayModal" class="hidden fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4">
+        <div class="bg-white text-gray-900 p-8 md:p-12 rounded-2xl shadow-2xl max-w-lg w-full text-center">
+            <h2 class="text-4xl md:text-5xl font-extrabold mb-4 text-blue-600">Time's Up!</h2>
+            <p class="text-lg md:text-2xl font-medium mb-8">
+                Look away from your screen for at least 20 seconds.
+                <br><br>
+                This helps your eyes relax.
+            </p>
+            <button id="closeModalButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-10 text-xl rounded-full shadow-lg transition-all duration-300 ease-in-out transform hover:scale-105">
+                OK, I've rested
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Set the countdown duration (15 minutes)
+        const COUNTDOWN_DURATION_SECONDS = 15 * 60; // 900 seconds
+        let countdownDuration = COUNTDOWN_DURATION_SECONDS;
+
+        // Get DOM elements
+        const startButton = document.getElementById('startButton');
+        const countdownDisplay = document.getElementById('countdownDisplay');
+        const totalTimeDisplay = document.getElementById('totalTimeDisplay');
+        const lookAwayModal = document.getElementById('lookAwayModal');
+        const closeModalButton = document.getElementById('closeModalButton');
+
+        // State variables
+        let isRunning = false;
+        let countdownSeconds = countdownDuration;
+        let totalSeconds = 0;
+        let countdownInterval = null;
+        let totalTimeInterval = null;
+        let audioContext = null;
+        let notificationAudio = null; // To control the repeating sound
+
+        // Event Listeners
+        startButton.addEventListener('click', toggleTimer);
+        closeModalButton.addEventListener('click', hideModal);
+
+        /**
+         * Initializes the AudioContext on the first user interaction.
+         * This is required by modern browsers to play audio.
+         */
+        function initAudio() {
+            if (!audioContext && (window.AudioContext || window.webkitAudioContext)) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        /**
+         * Starts or stops the timers.
+         */
+        function toggleTimer() {
+            // Initialize audio on the first click
+            initAudio(); 
+
+            if (isRunning) {
+                // Stop the timer
+                isRunning = false;
+                startButton.textContent = 'Start';
+                startButton.classList.remove('bg-red-600', 'hover:bg-red-700');
+                startButton.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                
+                clearInterval(countdownInterval);
+                clearInterval(totalTimeInterval);
+            } else {
+                // Start the timer
+                
+                // Request notification permission on the first start
+                if ('Notification' in window && Notification.permission === 'default') {
+                    Notification.requestPermission().then(permission => {
+                        if (permission === 'granted') {
+                            console.log('Notification permission granted.');
+                        } else {
+                            console.log('Notification permission denied.');
+                        }
+                    });
+                }
+
+                isRunning = true;
+                startButton.textContent = 'Stop';
+                startButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                startButton.classList.add('bg-red-600', 'hover:bg-red-700');
+
+                // Start both intervals
+                startCountdown();
+                startTotalTime();
+            }
+        }
+
+        /**
+         * Starts the 15-minute countdown.
+         */
+        function startCountdown() {
+            // Clear any existing interval
+            clearInterval(countdownInterval);
+            updateCountdownDisplay(); // Show current time immediately
+            
+            // Start a new interval that runs every second
+            countdownInterval = setInterval(() => {
+                if (countdownSeconds > 0) {
+                    countdownSeconds--;
+                    updateCountdownDisplay();
+                } else {
+                    // Time's up!
+                    clearInterval(countdownInterval);
+                    showModal();
+                    playNotificationSound();
+                    showBrowserNotification(); // Add this call
+                }
+            }, 1000);
+        }
+
+        /**
+         * Starts the total time tracker.
+         */
+        function startTotalTime() {
+            // Clear any existing interval
+            clearInterval(totalTimeInterval);
+            
+            // Start a new interval that runs every second
+            totalTimeInterval = setInterval(() => {
+                totalSeconds++;
+                updateTotalTimeDisplay();
+            }, 1000);
+        }
+
+        /**
+         * Updates the 15-minute countdown display (MM:SS).
+         */
+        function updateCountdownDisplay() {
+            const minutes = Math.floor(countdownSeconds / 60);
+            const seconds = countdownSeconds % 60;
+            countdownDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        /**
+         * Updates the total time display (HH:MM:SS).
+         */
+        function updateTotalTimeDisplay() {
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+            
+            totalTimeDisplay.textContent = `Total Time: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        /**
+         * Shows the "Look Away" modal.
+         */
+        function showModal() {
+            lookAwayModal.classList.remove('hidden');
+        }
+
+        /**
+         * Hides the "Look Away" modal and restarts the countdown.
+         */
+        function hideModal() {
+            // Stop the repeating sound
+            if (notificationAudio) {
+                notificationAudio.stop();
+                notificationAudio.disconnect();
+                notificationAudio = null;
+            }
+
+            lookAwayModal.classList.add('hidden');
+            
+            // Reset the countdown
+            countdownSeconds = countdownDuration;
+            updateCountdownDisplay();
+
+            // --- Automatically start the next timer cycle ---
+            
+            // 1. Ensure the state is "running"
+            isRunning = true;
+
+            // 2. Ensure the button shows "Stop"
+            startButton.textContent = 'Stop';
+            startButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+            startButton.classList.add('bg-red-600', 'hover:bg-red-700');
+
+            // 3. Start the countdown
+            startCountdown();
+            
+            // 4. Ensure the total time is running (re-starts it if it was paused)
+            startTotalTime();
+        }
+
+        /**
+         * Plays a simple notification sound using the Web Audio API.
+         */
+        function playNotificationSound() {
+            if (!audioContext) return; // Audio not initialized or supported
+            if (notificationAudio) return; // Don't start a new one if already playing
+
+            try {
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                oscillator.type = 'sine'; // Simple tone
+                oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // A5 note
+                gainNode.gain.setValueAtTime(0.5, audioContext.currentTime); // Volume
+
+                oscillator.loop = true; // Make the sound repeat
+
+                // Start the tone
+                oscillator.start(audioContext.currentTime);
+
+                // Store the oscillator so we can stop it later
+                notificationAudio = oscillator;
+            } catch (error) {
+                console.error("Could not play notification sound:", error);
+            }
+        }
+
+        /**
+         * Shows a browser notification if permission is granted.
+         */
+        function showBrowserNotification() {
+            if ('Notification' in window && Notification.permission === 'granted') {
+                const notification = new Notification("Time's Up!", {
+                    body: "Time to look away and rest your eyes!",
+                    // Note: 'icon' is not used here to avoid external dependencies
+                });
+            }
+        }
+    </script>
+
+</body>
+</html>
